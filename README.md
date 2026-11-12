@@ -2,14 +2,20 @@
 
 Android floating virtual companion — first milestone.
 
+## Character direction
+- Use the supplied blue-gray-haired, cyan-eyed character references as the visual guide.
+- Omit the large weapon and all weapon props.
+- Prioritize a waist-up / upper-body overlay avatar.
+- Preserve the long slate-blue hair with teal highlights, blue-and-white jacket, white shirt, cyan tie, and dark pleated skirt where visible.
+- Target a Live2D-style 2.5D rig with blink, gaze, mouth shapes, expressions, head X/Y/Z, breathing, and secondary hair motion.
+- The generated expression/model-sheet image is a visual concept only; it is not a layered PSD/CLIP file or a rigged Live2D model.
+
 ## Current milestone
 - Request Android's "Display over other apps" permission.
 - Start a foreground service after permission is granted.
 - Show a floating Aai launcher bubble over other apps.
 - Tap the bubble to summon/dismiss a temporary character placeholder.
 - Double-tap the bubble to open a placeholder chat screen.
-
-The character artwork and rig are intentionally not included yet. Add the user's authorized character reference before preparing layered 2.5D assets.
 
 ## Build
 Open this project in Android Studio (Giraffe or newer), install Android SDK 35, then sync and run the `app` configuration.
