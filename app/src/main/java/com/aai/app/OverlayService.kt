@@ -128,8 +128,8 @@ class OverlayService : Service() {
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.END
-            x = prefs.getInt(KEY_X, dp(8)).coerceAtLeast(0)
+            gravity = Gravity.TOP or Gravity.LEFT
+            x = prefs.getInt(KEY_X, screenW - width - dp(8)).coerceAtLeast(0)
             y = prefs.getInt(KEY_Y, (screenH * 0.18f).toInt()).coerceAtLeast(dp(24))
         }
         characterParams = params
@@ -157,14 +157,14 @@ class OverlayService : Service() {
                     gestureMoved = false
                     true
                 }
-                MotionEvent.ACTION_POINTER_DOWN -> true
+                MotionEvent.ACTION_POINTER_DOWN -> { gestureMoved = true; true }
                 MotionEvent.ACTION_MOVE -> {
                     if (event.pointerCount == 1 && !scaleDetector.isInProgress) {
                         val dx = event.rawX - initialTouchX
                         val dy = event.rawY - initialTouchY
                         if (kotlin.math.abs(dx) > dp(4) || kotlin.math.abs(dy) > dp(4)) {
                             gestureMoved = true
-                            params.x = initialWindowX - dx.toInt()
+                            params.x = initialWindowX + dx.toInt()
                             params.y = initialWindowY + dy.toInt()
                             keepCharacterOnScreen(params)
                             runCatching { windowManager.updateViewLayout(touched, params) }
