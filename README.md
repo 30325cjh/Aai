@@ -15,7 +15,7 @@ Android floating virtual companion — first milestone.
 - Start a foreground service after permission is granted.
 - Show a floating Aai launcher bubble over other apps.
 - Tap the bubble to summon/dismiss a temporary character placeholder.
-- Double-tap the bubble to open a placeholder chat screen.
+- Double-tap the bubble to reveal an inline Gemini-style chat bar beneath the character (no separate chat Activity).
 
 ## Download an APK from GitHub
 1. Open the repository's **Actions** tab.
@@ -30,7 +30,7 @@ Open this project in Android Studio (Giraffe or newer), install Android SDK 35, 
 
 ## Target experience
 - Android floating overlay launcher
-- 2.5D upper-body character (Live2D-style layered artwork / rig)
+- 2.5D upper-body character (Live2D-style layered artwork / rig; current UI uses a temporary character-stage placeholder)
 - Blink, mouth movement, expressions, head motion, hair physics
 - AI conversation and permitted Android app/intent actions
 
