@@ -30,9 +30,12 @@ Open this project in Android Studio (Giraffe or newer), install Android SDK 35, 
 
 ## Target experience
 - Android floating overlay launcher
-- 2.5D upper-body character (Live2D-style layered artwork / rig; current UI uses a temporary character-stage placeholder)
+- Animated vector character prototype with breathing, blinking, talking mouth, and temporary expressions; production layered 2.5D/Live2D artwork is still pending
 - Blink, mouth movement, expressions, head motion, hair physics
-- AI conversation and permitted Android app/intent actions
+- No AI connection (intentionally removed from scope)
+- Slash expression commands: /웃다, /슬프다, /놀라다, /울다, /기본
+- Supported app-launch commands (e.g. 크롬 열어줘, 유튜브 열어줘)
+- Web search commands (e.g. 검색해 고양이 사진), opened in the default browser
 
 ## Notes
 - Personal use does not automatically grant rights to third-party character artwork or remove SDK/runtime license terms. Use artwork you own or have permission to adapt, and review the chosen runtime's terms.
