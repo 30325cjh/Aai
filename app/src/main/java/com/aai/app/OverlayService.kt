@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.net.Uri
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.os.Build
@@ -29,6 +30,8 @@ class OverlayService : Service() {
     private var chatBar: LinearLayout? = null
     private var chatHistory: TextView? = null
     private var messageInput: EditText? = null
+    private var characterView: CharacterView? = null
+    private var speechBubble: TextView? = null
     private var panelVisible = false
     private var chatVisible = false
     private var downX = 0
@@ -135,17 +138,29 @@ class OverlayService : Service() {
             }
         }
 
-        // Character stage: sized to roughly 45% of the screen height.
-        val characterStage = TextView(this).apply {
-            text = "Aai\n\n캐릭터 일러스트 준비 중"
-            textSize = 22f
-            gravity = Gravity.CENTER
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0x332D8DCA)
-        }
+        // Animated character stage; temporary vector rig until layered artwork is ready.
+        val characterStage = CharacterView(this)
+        characterView = characterStage
         root.addView(characterStage, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+        ))
+
+        val speech = TextView(this).apply {
+            textSize = 14f
+            gravity = Gravity.CENTER
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(0xFF26334A.toInt())
+            setPadding(dp(14), dp(9), dp(14), dp(9))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xFFF4F8FF.toInt())
+                cornerRadius = dp(18).toFloat()
+                setStroke(dp(1), 0xFF8CCBF1.toInt())
+            }
+            visibility = View.GONE
+        }
+        speechBubble = speech
+        root.addView(speech, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ))
 
         val history = TextView(this).apply {
@@ -202,7 +217,7 @@ class OverlayService : Service() {
 
         val metrics = resources.displayMetrics
         val panelWidth = (metrics.widthPixels * 0.94f).toInt()
-        val panelHeight = (metrics.heightPixels * 0.62f).toInt()
+        val panelHeight = (metrics.heightPixels * 0.55f).toInt()
         val params = WindowManager.LayoutParams(
             panelWidth, panelHeight,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -250,8 +265,105 @@ class OverlayService : Service() {
         val text = messageInput?.text?.toString()?.trim().orEmpty()
         if (text.isEmpty()) return
         val current = chatHistory?.text?.toString().orEmpty()
-        chatHistory?.text = "$current\n나: $text\nAai: 아직 AI 연결 전이에요."
+        chatHistory?.text = "$current\n나: $text"
         messageInput?.setText("")
+        handleCommand(text)
+    }
+
+    private fun handleCommand(raw: String) {
+        val text = raw.trim()
+        val command = text.removePrefix("/").trim().lowercase()
+        val expression = when (command) {
+            "웃다", "웃어", "웃기", "웃는 표정", "happy" -> CharacterView.Expression.HAPPY
+            "슬프다", "슬퍼", "슬픈 표정", "sad" -> CharacterView.Expression.SAD
+            "놀라다", "놀라", "놀란 표정", "surprised" -> CharacterView.Expression.SURPRISED
+            "울다", "울어", "우는 표정", "cry" -> CharacterView.Expression.CRYING
+            "기본", "원래대로", "normal" -> CharacterView.Expression.NORMAL
+            else -> null
+        }
+        if (text.startsWith("/") && expression != null) {
+            characterView?.setExpression(expression)
+            val label = when (expression) {
+                CharacterView.Expression.HAPPY -> "웃는"
+                CharacterView.Expression.SAD -> "슬픈"
+                CharacterView.Expression.SURPRISED -> "놀란"
+                CharacterView.Expression.CRYING -> "우는"
+                else -> "평온한"
+            }
+            showSpeech("$label 표정으로 바꿨어요!", 2800L)
+            appendAssistant("표정을 변경했어요.")
+            return
+        }
+        if (text.startsWith("/")) {
+            showSpeech("/웃다 · /슬프다 · /놀라다 · /울다", 4000L)
+            appendAssistant("사용할 수 있는 표정 명령어를 알려드렸어요.")
+            return
+        }
+
+        val searchWords = listOf("검색해줘", "검색해", "검색", "찾아줘", "찾아봐", "찾아")
+        val searchPrefix = searchWords.firstOrNull { text.startsWith(it) }
+        if (searchPrefix != null) {
+            val query = text.removePrefix(searchPrefix).trim()
+            if (query.isNotBlank()) {
+                showSpeech("$query 검색 결과를 보여드릴게요!", 3200L)
+                appendAssistant("$query 검색 결과를 브라우저에서 열었어요.")
+                val url = "https://www.google.com/search?q=" + Uri.encode(query)
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            } else {
+                showSpeech("검색할 내용을 입력해 주세요.", 2600L)
+            }
+            return
+        }
+
+        val apps = listOf(
+            Triple(listOf("크롬", "chrome"), "Chrome", "com.android.chrome"),
+            Triple(listOf("유튜브", "youtube"), "YouTube", "com.google.android.youtube"),
+            Triple(listOf("설정"), "설정", "com.android.settings"),
+            Triple(listOf("계산기"), "계산기", "com.sec.android.app.popupcalculator"),
+            Triple(listOf("카메라"), "카메라", "com.sec.android.app.camera"),
+            Triple(listOf("지도", "구글맵"), "지도", "com.google.android.apps.maps"),
+            Triple(listOf("플레이스토어", "play스토어"), "Play 스토어", "com.android.vending"),
+            Triple(listOf("삼성인터넷", "인터넷"), "삼성 인터넷", "com.sec.android.app.sbrowser"),
+            Triple(listOf("갤러리"), "갤러리", "com.sec.android.gallery3d"),
+            Triple(listOf("내파일", "파일"), "내 파일", "com.sec.android.app.myfiles"),
+            Triple(listOf("캘린더", "달력"), "캘린더", "com.samsung.android.calendar"),
+            Triple(listOf("노트", "삼성노트"), "삼성 노트", "com.samsung.android.app.notes")
+        )
+        val target = apps.firstOrNull { item -> item.first.any { text.contains(it, ignoreCase = true) } }
+        if (target != null && listOf("열어", "켜", "실행", "열기", "띄워").any { text.contains(it) }) {
+            val launch = packageManager.getLaunchIntentForPackage(target.third)
+            if (launch != null) {
+                showSpeech("웃으며 ${target.second} 앱을 열어드릴게요!", 3000L)
+                characterView?.setExpression(CharacterView.Expression.HAPPY, 2600L)
+                appendAssistant("${target.second} 앱을 열었어요.")
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(launch)
+            } else {
+                showSpeech("${target.second} 앱을 찾지 못했어요.", 3000L)
+                appendAssistant("${target.second} 앱이 설치되어 있는지 확인해 주세요.")
+            }
+            return
+        }
+
+        showSpeech("앱 열기는 '크롬 열어줘', 검색은 '검색해 날씨'처럼 입력해 주세요.", 4200L)
+        appendAssistant("현재는 앱 실행, 웹 검색, 표정 명령어를 지원해요.")
+    }
+
+    private fun appendAssistant(message: String) {
+        val current = chatHistory?.text?.toString().orEmpty()
+        chatHistory?.text = "$current\nAai: $message"
+    }
+
+    private fun showSpeech(message: String, duration: Long) {
+        speechBubble?.apply {
+            text = message
+            visibility = View.VISIBLE
+        }
+        characterView?.setTalking(true)
+        speechBubble?.postDelayed({
+            speechBubble?.visibility = View.GONE
+            characterView?.setTalking(false)
+        }, duration)
     }
 
     private fun removeCharacterPanel() {
@@ -262,6 +374,8 @@ class OverlayService : Service() {
         chatBar = null
         chatHistory = null
         messageInput = null
+        characterView = null
+        speechBubble = null
         panelVisible = false
         chatVisible = false
     }
