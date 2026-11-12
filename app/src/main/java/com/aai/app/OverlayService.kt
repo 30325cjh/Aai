@@ -308,7 +308,12 @@ class OverlayService : Service() {
                 showSpeech("$query 검색 결과를 보여드릴게요!", 3200L)
                 appendAssistant("$query 검색 결과를 브라우저에서 열었어요.")
                 val url = "https://www.google.com/search?q=" + Uri.encode(query)
-                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (packageManager.getLaunchIntentForPackage("com.android.chrome") != null) {
+                    browserIntent.setPackage("com.android.chrome")
+                }
+                startActivity(browserIntent)
             } else {
                 showSpeech("검색할 내용을 입력해 주세요.", 2600L)
             }
