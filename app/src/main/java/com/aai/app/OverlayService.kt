@@ -120,8 +120,14 @@ class OverlayService : Service() {
             setBackgroundColor(0xDD29243D.toInt())
             setOnClickListener { openChat() }
         }
+        // Character display bounds: approximately 45% of the usable screen width
+        // and height. The final Live2D renderer will preserve its own aspect ratio
+        // inside this responsive overlay area.
+        val metrics = resources.displayMetrics
+        val panelWidth = (metrics.widthPixels * 0.45f).toInt()
+        val panelHeight = (metrics.heightPixels * 0.45f).toInt()
         val params = WindowManager.LayoutParams(
-            dp(240), dp(300),
+            panelWidth, panelHeight,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
