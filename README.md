@@ -17,7 +17,15 @@ Android floating virtual companion — first milestone.
 - Tap the bubble to summon/dismiss a temporary character placeholder.
 - Double-tap the bubble to open a placeholder chat screen.
 
-## Build
+## Download an APK from GitHub
+1. Open the repository's **Actions** tab.
+2. Select **Build Aai APK** and open the latest successful run.
+3. Download **Aai-debug-apk** from the Artifacts section. GitHub artifacts are retained for 30 days.
+4. For a versioned downloadable release, push a version tag (for example `v0.1.0`); the workflow attaches the debug APK to that GitHub Release.
+
+The first workflow run starts automatically after relevant source changes are pushed, or can be started manually from Actions → Build Aai APK → Run workflow.
+
+## Build locally
 Open this project in Android Studio (Giraffe or newer), install Android SDK 35, then sync and run the `app` configuration.
 
 ## Target experience
