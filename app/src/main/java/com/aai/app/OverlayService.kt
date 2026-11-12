@@ -175,7 +175,7 @@ class OverlayService : Service() {
         val input = EditText(this).apply {
             hint = "Aai에게 무엇이든 물어보세요"
             textSize = 14f
-            singleLine = true
+            setSingleLine(true)
             setTextColor(0xFF202536.toInt())
             setHintTextColor(0xFF7D8494.toInt())
             background = null
