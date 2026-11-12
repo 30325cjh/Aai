@@ -15,14 +15,22 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
+import android.content.Context
+import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
 
 class OverlayService : Service() {
     private lateinit var windowManager: WindowManager
     private var bubble: TextView? = null
-    private var characterPanel: TextView? = null
+    private var characterPanel: LinearLayout? = null
+    private var chatBar: LinearLayout? = null
+    private var chatHistory: TextView? = null
+    private var messageInput: EditText? = null
     private var panelVisible = false
+    private var chatVisible = false
     private var downX = 0
     private var downY = 0
     private var startX = 0
@@ -74,7 +82,8 @@ class OverlayService : Service() {
                         if (!moved) {
                             val now = System.currentTimeMillis()
                             if (now - lastTapAt < 320) {
-                                openChat()
+                                if (!panelVisible) showCharacterPanel()
+                                toggleChatBar()
                                 lastTapAt = 0L
                             } else {
                                 lastTapAt = now
@@ -106,43 +115,155 @@ class OverlayService : Service() {
 
     private fun toggleCharacterPanel() {
         if (panelVisible) {
-            characterPanel?.let { windowManager.removeView(it) }
-            characterPanel = null
-            panelVisible = false
-            return
+            removeCharacterPanel()
+        } else {
+            showCharacterPanel()
         }
-        val panel = TextView(this).apply {
-            text = "Aai\n캐릭터 모델을 기다리는 중이에요."
-            textSize = 18f
+    }
+
+    private fun showCharacterPanel() {
+        if (panelVisible) return
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setTextColor(0xFFFFFFFF.toInt())
-            setPadding(dp(20), dp(20), dp(20), dp(20))
-            setBackgroundColor(0xDD29243D.toInt())
-            setOnClickListener { openChat() }
+            setPadding(dp(10), dp(10), dp(10), dp(8))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xE6222635.toInt())
+                cornerRadius = dp(24).toFloat()
+                setStroke(dp(1), 0x665ACDFF)
+            }
         }
-        // Character display bounds: approximately 45% of the usable screen width
-        // and height. The final Live2D renderer will preserve its own aspect ratio
-        // inside this responsive overlay area.
+
+        // Character stage: sized to roughly 45% of the screen height.
+        val characterStage = TextView(this).apply {
+            text = "Aai\n\n캐릭터 일러스트 준비 중"
+            textSize = 22f
+            gravity = Gravity.CENTER
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(0xFFFFFFFF.toInt())
+            setBackgroundColor(0x332D8DCA)
+        }
+        root.addView(characterStage, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+        ))
+
+        val history = TextView(this).apply {
+            text = "Aai와 나눈 대화가 여기에 표시돼요."
+            textSize = 13f
+            setTextColor(0xFFEAF4FF.toInt())
+            setPadding(dp(8), dp(6), dp(8), dp(4))
+            visibility = View.GONE
+        }
+        chatHistory = history
+        root.addView(history, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(52)
+        ))
+
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(4), dp(6), dp(4))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xFFF4F6FC.toInt())
+                cornerRadius = dp(30).toFloat()
+            }
+            visibility = View.GONE
+        }
+        chatBar = bar
+
+        val input = EditText(this).apply {
+            hint = "Aai에게 무엇이든 물어보세요"
+            textSize = 14f
+            singleLine = true
+            setTextColor(0xFF202536.toInt())
+            setHintTextColor(0xFF7D8494.toInt())
+            background = null
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND
+        }
+        messageInput = input
+        bar.addView(input, LinearLayout.LayoutParams(0, dp(48), 1f))
+
+        val send = Button(this).apply {
+            text = "➤"
+            textSize = 18f
+            setOnClickListener { sendMessage() }
+        }
+        bar.addView(send, LinearLayout.LayoutParams(dp(48), dp(48)))
+        input.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEND) {
+                sendMessage()
+                true
+            } else false
+        }
+        root.addView(bar, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(54)
+        ))
+
         val metrics = resources.displayMetrics
-        val panelWidth = (metrics.widthPixels * 0.45f).toInt()
-        val panelHeight = (metrics.heightPixels * 0.45f).toInt()
+        val panelWidth = (metrics.widthPixels * 0.94f).toInt()
+        val panelHeight = (metrics.heightPixels * 0.62f).toInt()
         val params = WindowManager.LayoutParams(
             panelWidth, panelHeight,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.CENTER
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         }
-        windowManager.addView(panel, params)
-        characterPanel = panel
+        windowManager.addView(root, params)
+        characterPanel = root
         panelVisible = true
     }
 
-    private fun openChat() {
-        val intent = Intent(this, ChatActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        startActivity(intent)
+    private fun toggleChatBar() {
+        val bar = chatBar ?: return
+        chatVisible = !chatVisible
+        bar.visibility = if (chatVisible) View.VISIBLE else View.GONE
+        chatHistory?.visibility = if (chatVisible) View.VISIBLE else View.GONE
+        if (chatVisible) {
+            characterPanel?.let {
+                val p = it.layoutParams as WindowManager.LayoutParams
+                p.flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                windowManager.updateViewLayout(it, p)
+            }
+            messageInput?.requestFocus()
+            messageInput?.postDelayed({
+                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                messageInput?.let { imm.showSoftInput(it, InputMethodManager.SHOW_IMPLICIT) }
+            }, 180)
+        } else {
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            messageInput?.let { imm.hideSoftInputFromWindow(it.windowToken, 0) }
+            characterPanel?.let {
+                val p = it.layoutParams as WindowManager.LayoutParams
+                p.flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM
+                windowManager.updateViewLayout(it, p)
+            }
+        }
+    }
+
+    private fun sendMessage() {
+        val text = messageInput?.text?.toString()?.trim().orEmpty()
+        if (text.isEmpty()) return
+        val current = chatHistory?.text?.toString().orEmpty()
+        chatHistory?.text = "$current\n나: $text\nAai: 아직 AI 연결 전이에요."
+        messageInput?.setText("")
+    }
+
+    private fun removeCharacterPanel() {
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        messageInput?.let { imm.hideSoftInputFromWindow(it.windowToken, 0) }
+        characterPanel?.let { windowManager.removeView(it) }
+        characterPanel = null
+        chatBar = null
+        chatHistory = null
+        messageInput = null
+        panelVisible = false
+        chatVisible = false
     }
 
     private fun buildNotification(): Notification {
@@ -180,9 +301,8 @@ class OverlayService : Service() {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     override fun onDestroy() {
-        characterPanel?.let { windowManager.removeView(it) }
+        removeCharacterPanel()
         bubble?.let { windowManager.removeView(it) }
-        characterPanel = null
         bubble = null
         super.onDestroy()
     }
