@@ -1,43 +1,44 @@
 # Aai
 
-Android floating virtual companion — first milestone.
+Android floating character companion.
 
-## Character direction
-- Use the supplied blue-gray-haired, cyan-eyed character references as the visual guide.
-- Omit the large weapon and all weapon props.
-- Prioritize a waist-up / upper-body overlay avatar.
-- Preserve the long slate-blue hair with teal highlights, blue-and-white jacket, white shirt, cyan tie, and dark pleated skirt where visible.
-- Target a Live2D-style 2.5D rig with blink, gaze, mouth shapes, expressions, head X/Y/Z, breathing, and secondary hair motion.
-- The generated expression/model-sheet image is a visual concept only; it is not a layered PSD/CLIP file or a rigged Live2D model.
+## Current implementation
 
-## Current milestone
-- Request Android's "Display over other apps" permission.
-- Start a foreground service after permission is granted.
-- Show a floating Aai launcher bubble over other apps.
-- Tap the bubble to summon/dismiss a temporary character placeholder.
-- Double-tap the bubble to reveal an inline Gemini-style chat bar beneath the character (no separate chat Activity).
+- The temporary vector placeholder has been replaced with a transparent cut-out derived from the supplied ARIS character model-sheet image.
+- The original character colors and proportions are retained as far as the single flattened reference permits.
+- The renderer applies subtle breathing, idle sway, blink, and expression/talking overlays.
+- The large weapon from the separate full-body reference is not used; the character cut-out is taken from the model-sheet's central figure.
+- The source references are flattened images, not separated PSD/CLIP/Live2D layers. Therefore hair physics, independently moving limbs, eye gaze, and full Live2D deformation are not available in this milestone. Those require original separated transparent parts or manual reconstruction.
 
-## Download an APK from GitHub
+## Overlay and controls
+
+- User-granted "Display over other apps" permission is required.
+- The foreground service shows a small launcher bubble. Tap it to summon or dismiss ARIS.
+- The character uses its own compact transparent overlay window; the chat bar is a separate compact window below the character.
+- Areas outside those window rectangles are configured not to be touch-modal and should pass touches to the app underneath.
+- Long-press the launcher bubble or use the foreground notification's **오버레이 종료** action to close the overlay.
+- Double-tap the character to show/hide the inline command bar.
+- Drag with one finger to move; pinch with two fingers to resize. Placement and scale persist across launches.
+- Commands: `/웃다`, `/슬프다`, `/놀라다`, `/울다`, `/기본`.
+- App launch examples: `크롬 열어줘`, `유튜브 열어줘`, `설정 열어줘`.
+- Web search example: `검색해 고양이`.
+- No AI backend and no voice output are included.
+
+## Important touch limitation
+
+Android delivers touch to an overlay window using its rectangular window bounds; transparent pixels inside that rectangle are not guaranteed to pass through. Aai keeps the character window tightly sized around the artwork and uses `FLAG_NOT_TOUCH_MODAL` so touches outside the character window pass through. A true pixel-perfect irregular touch region is not guaranteed by this implementation. If the overlay ever behaves unexpectedly, use the notification action or long-press the launcher bubble to stop it.
+
+## Download an APK
+
 1. Open the repository's **Actions** tab.
 2. Select **Build Aai APK** and open the latest successful run.
-3. Download **Aai-debug-apk** from the Artifacts section. GitHub artifacts are retained for 30 days.
-4. For a versioned downloadable release, push a version tag (for example `v0.1.0`); the workflow attaches the debug APK to that GitHub Release.
-
-The first workflow run starts automatically after relevant source changes are pushed, or can be started manually from Actions → Build Aai APK → Run workflow.
+3. Download **Aai-debug-apk** from the Artifacts section. Artifacts are retained for 30 days.
+4. Push a version tag to publish a GitHub Release if desired.
 
 ## Build locally
-Open this project in Android Studio (Giraffe or newer), install Android SDK 35, then sync and run the `app` configuration.
 
-## Target experience
-- Android floating overlay launcher
-- Animated vector character prototype with breathing, blinking, talking mouth, and temporary expressions; production layered 2.5D/Live2D artwork is still pending
-- Blink, mouth movement, expressions, head motion, hair physics
-- No AI connection (intentionally removed from scope)
-- Slash expression commands: /웃다, /슬프다, /놀라다, /울다, /기본
-- Supported app-launch commands (e.g. 크롬 열어줘, 유튜브 열어줘)
-- Web search commands (e.g. 검색해 고양이 사진), opened in the default browser
+Open in Android Studio, install Android SDK 35 and JDK 17, then run `gradle assembleDebug`.
 
-## Notes
-- Personal use does not automatically grant rights to third-party character artwork or remove SDK/runtime license terms. Use artwork you own or have permission to adapt, and review the chosen runtime's terms.
-- Android restricts background launches and overlay behavior. The service uses a foreground notification and the user must explicitly grant overlay permission.
-- This first milestone is a scaffold, not a finished APK. Device testing and Android-version-specific permission handling remain necessary.
+## Artwork and licensing
+
+The included transparent cut-out is a best-effort extraction from the user-provided flattened model-sheet image. It is not a true Live2D model or separated layer source. Use only artwork you own or are authorized to adapt, and review applicable character-art and runtime terms.
