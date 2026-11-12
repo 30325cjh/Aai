@@ -81,6 +81,7 @@ class OverlayService : Service() {
             setBackgroundResource(android.R.drawable.btn_default)
             elevation = dp(5).toFloat()
             setOnClickListener { toggleCharacter() }
+            setOnLongClickListener { stopOverlayAndService(); true }
         }
         val params = WindowManager.LayoutParams(
             dp(52), dp(52),
@@ -110,7 +111,7 @@ class OverlayService : Service() {
         currentScale = prefs.getFloat(KEY_SCALE, 1f).coerceIn(0.65f, 1.8f)
         val desiredHeight = (screenH * 0.42f).toInt().coerceIn(dp(250), dp(440))
         baseHeight = desiredHeight
-        baseWidth = (desiredHeight * 0.786f).toInt()
+        baseWidth = (desiredHeight * 0.64f).toInt()
         val width = (baseWidth * currentScale).toInt()
         val height = (baseHeight * currentScale).toInt()
 
@@ -249,7 +250,13 @@ class OverlayService : Service() {
             }
             elevation = dp(8).toFloat()
             addView(input, LinearLayout.LayoutParams(0, dp(48), 1f))
-            addView(send, LinearLayout.LayoutParams(dp(48), dp(48)))
+            addView(send, LinearLayout.LayoutParams(dp(44), dp(48)))
+            addView(Button(this@OverlayService).apply {
+                text = "×"
+                textSize = 18f
+                minWidth = 0
+                setOnClickListener { hideChatBar() }
+            }, LinearLayout.LayoutParams(dp(40), dp(48)))
         }
         input.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEND) {
@@ -270,13 +277,14 @@ class OverlayService : Service() {
         }
         val screenW = resources.displayMetrics.widthPixels
         val params = WindowManager.LayoutParams(
-            min(screenW - dp(20), dp(520)), dp(78),
+            min(screenW - dp(32), dp(420)), dp(78),
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            gravity = Gravity.TOP or Gravity.LEFT
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
         }
         chatBar = container
@@ -302,6 +310,7 @@ class OverlayService : Service() {
         val cp = characterParams ?: return
         val bp = chatParams ?: return
         val screenH = resources.displayMetrics.heightPixels
+        bp.x = (cp.x + cp.width / 2 - bp.width / 2).coerceIn(dp(8), max(dp(8), resources.displayMetrics.widthPixels - bp.width - dp(8)))
         bp.y = min(cp.y + cp.height + dp(8), screenH - dp(100)).coerceAtLeast(dp(24))
         runCatching { chatBar?.let { windowManager.updateViewLayout(it, bp) } }
     }
