@@ -5,40 +5,53 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.graphics.PixelFormat
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
-import android.content.Context
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import kotlin.math.max
+import kotlin.math.min
 
+/**
+ * Floating character overlay.
+ *
+ * The character and chat bar are separate, tightly-sized windows. This is intentional:
+ * a full-screen transparent overlay can still consume touches even when nothing is drawn.
+ */
 class OverlayService : Service() {
     private lateinit var windowManager: WindowManager
     private var bubble: TextView? = null
-    private var characterPanel: LinearLayout? = null
-    private var chatBar: LinearLayout? = null
-    private var chatHistory: TextView? = null
-    private var messageInput: EditText? = null
     private var characterView: CharacterView? = null
-    private var speechBubble: TextView? = null
-    private var panelVisible = false
+    private var chatBar: LinearLayout? = null
+    private var chatInput: EditText? = null
+    private var chatStatus: TextView? = null
+    private var characterParams: WindowManager.LayoutParams? = null
+    private var chatParams: WindowManager.LayoutParams? = null
     private var chatVisible = false
-    private var downX = 0
-    private var downY = 0
-    private var startX = 0
-    private var startY = 0
     private var lastTapAt = 0L
+    private var initialTouchX = 0f
+    private var initialTouchY = 0f
+    private var initialWindowX = 0
+    private var initialWindowY = 0
+    private var gestureMoved = false
+    private var currentScale = 1f
+    private var baseWidth = 0
+    private var baseHeight = 0
 
     override fun onCreate() {
         super.onCreate()
@@ -49,6 +62,10 @@ class OverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            stopOverlayAndService()
+            return START_NOT_STICKY
+        }
         if (bubble == null && Settings.canDrawOverlays(this)) addBubble()
         return START_STICKY
     }
@@ -62,211 +79,239 @@ class OverlayService : Service() {
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(0xFFFFFFFF.toInt())
             setBackgroundResource(android.R.drawable.btn_default)
-            elevation = 12f
-            setOnTouchListener { v, event ->
-                val params = v.layoutParams as WindowManager.LayoutParams
-                when (event.action) {
-                    MotionEvent.ACTION_DOWN -> {
-                        downX = event.rawX.toInt()
-                        downY = event.rawY.toInt()
-                        startX = params.x
-                        startY = params.y
-                        true
-                    }
-                    MotionEvent.ACTION_MOVE -> {
-                        params.x = startX + (downX - event.rawX.toInt())
-                        params.y = startY + (event.rawY.toInt() - downY)
-                        windowManager.updateViewLayout(v, params)
-                        true
-                    }
-                    MotionEvent.ACTION_UP -> {
-                        val moved = kotlin.math.abs(event.rawX.toInt() - downX) > 12 ||
-                            kotlin.math.abs(event.rawY.toInt() - downY) > 12
-                        if (!moved) {
-                            val now = System.currentTimeMillis()
-                            if (now - lastTapAt < 320) {
-                                if (!panelVisible) showCharacterPanel()
-                                toggleChatBar()
-                                lastTapAt = 0L
-                            } else {
-                                lastTapAt = now
-                                v.postDelayed({
-                                    if (lastTapAt == now) toggleCharacterPanel()
-                                }, 330)
-                            }
-                        }
-                        true
-                    }
-                    else -> true
-                }
-            }
+            elevation = dp(5).toFloat()
+            setOnClickListener { toggleCharacter() }
         }
         val params = WindowManager.LayoutParams(
-            dp(56), dp(56),
+            dp(52), dp(52),
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.END
             x = dp(12)
-            y = dp(180)
+            y = dp(170)
         }
         windowManager.addView(view, params)
         bubble = view
     }
 
-    private fun toggleCharacterPanel() {
-        if (panelVisible) {
-            removeCharacterPanel()
-        } else {
-            showCharacterPanel()
-        }
+    private fun toggleCharacter() {
+        if (characterView == null) showCharacter() else hideCharacter()
     }
 
-    private fun showCharacterPanel() {
-        if (panelVisible) return
+    private fun showCharacter() {
+        if (characterView != null || !Settings.canDrawOverlays(this)) return
 
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(10), dp(10), dp(10), dp(8))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xE6222635.toInt())
-                cornerRadius = dp(24).toFloat()
-                setStroke(dp(1), 0x665ACDFF)
+        val screenW = resources.displayMetrics.widthPixels
+        val screenH = resources.displayMetrics.heightPixels
+        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        currentScale = prefs.getFloat(KEY_SCALE, 1f).coerceIn(0.65f, 1.8f)
+        val desiredHeight = (screenH * 0.42f).toInt().coerceIn(dp(250), dp(440))
+        baseHeight = desiredHeight
+        baseWidth = (desiredHeight * 0.786f).toInt()
+        val width = (baseWidth * currentScale).toInt()
+        val height = (baseHeight * currentScale).toInt()
+
+        val view = CharacterView(this).apply {
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            contentDescription = "Aai 캐릭터. 드래그하거나 두 손가락으로 크기를 조절하고 두 번 누르면 채팅창이 열립니다."
+        }
+        characterView = view
+
+        val params = WindowManager.LayoutParams(
+            width, height,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.END
+            x = prefs.getInt(KEY_X, dp(8)).coerceAtLeast(0)
+            y = prefs.getInt(KEY_Y, (screenH * 0.18f).toInt()).coerceAtLeast(dp(24))
+        }
+        characterParams = params
+
+        val scaleDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                currentScale = (currentScale * detector.scaleFactor).coerceIn(0.65f, 1.8f)
+                params.width = (baseWidth * currentScale).toInt()
+                params.height = (baseHeight * currentScale).toInt()
+                keepCharacterOnScreen(params)
+                runCatching { windowManager.updateViewLayout(view, params) }
+                saveCharacterPlacement(params)
+                return true
+            }
+        })
+
+        view.setOnTouchListener { touched, event ->
+            scaleDetector.onTouchEvent(event)
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialTouchX = event.rawX
+                    initialTouchY = event.rawY
+                    initialWindowX = params.x
+                    initialWindowY = params.y
+                    gestureMoved = false
+                    true
+                }
+                MotionEvent.ACTION_POINTER_DOWN -> true
+                MotionEvent.ACTION_MOVE -> {
+                    if (event.pointerCount == 1 && !scaleDetector.isInProgress) {
+                        val dx = event.rawX - initialTouchX
+                        val dy = event.rawY - initialTouchY
+                        if (kotlin.math.abs(dx) > dp(4) || kotlin.math.abs(dy) > dp(4)) {
+                            gestureMoved = true
+                            params.x = initialWindowX - dx.toInt()
+                            params.y = initialWindowY + dy.toInt()
+                            keepCharacterOnScreen(params)
+                            runCatching { windowManager.updateViewLayout(touched, params) }
+                        }
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (scaleDetector.isInProgress || event.pointerCount > 1) {
+                        saveCharacterPlacement(params)
+                    } else if (!gestureMoved) {
+                        val now = System.currentTimeMillis()
+                        if (now - lastTapAt < 330L) {
+                            lastTapAt = 0L
+                            toggleChatBar()
+                        } else {
+                            lastTapAt = now
+                        }
+                    } else {
+                        saveCharacterPlacement(params)
+                    }
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    saveCharacterPlacement(params)
+                    true
+                }
+                else -> true
             }
         }
 
-        // Animated character stage; temporary vector rig until layered artwork is ready.
-        val characterStage = CharacterView(this)
-        characterView = characterStage
-        root.addView(characterStage, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
-        ))
+        windowManager.addView(view, params)
+        updateChatPosition()
+    }
 
-        val speech = TextView(this).apply {
-            textSize = 14f
-            gravity = Gravity.CENTER
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(0xFF26334A.toInt())
-            setPadding(dp(14), dp(9), dp(14), dp(9))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xFFF4F8FF.toInt())
-                cornerRadius = dp(18).toFloat()
-                setStroke(dp(1), 0xFF8CCBF1.toInt())
-            }
-            visibility = View.GONE
-        }
-        speechBubble = speech
-        root.addView(speech, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ))
+    private fun hideCharacter() {
+        hideChatBar()
+        characterView?.let { runCatching { windowManager.removeView(it) } }
+        characterView = null
+        characterParams = null
+    }
 
-        val history = TextView(this).apply {
-            text = "Aai와 나눈 대화가 여기에 표시돼요."
-            textSize = 13f
-            setTextColor(0xFFEAF4FF.toInt())
-            setPadding(dp(8), dp(6), dp(8), dp(4))
-            visibility = View.GONE
-        }
-        chatHistory = history
-        root.addView(history, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(52)
-        ))
+    private fun toggleChatBar() {
+        if (chatVisible) hideChatBar() else showChatBar()
+    }
 
-        val bar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(4), dp(6), dp(4))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xFFF4F6FC.toInt())
-                cornerRadius = dp(30).toFloat()
-            }
-            visibility = View.GONE
-        }
-        chatBar = bar
-
+    private fun showChatBar() {
+        if (chatVisible || characterView == null) return
         val input = EditText(this).apply {
-            hint = "Aai에게 무엇이든 물어보세요"
+            hint = "Aai에게 명령하기  ·  예: 크롬 열어줘"
             textSize = 14f
             setSingleLine(true)
             setTextColor(0xFF202536.toInt())
             setHintTextColor(0xFF7D8494.toInt())
             background = null
-            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND
+            imeOptions = EditorInfo.IME_ACTION_SEND
+            setPadding(dp(10), 0, dp(6), 0)
         }
-        messageInput = input
-        bar.addView(input, LinearLayout.LayoutParams(0, dp(48), 1f))
+        chatInput = input
+
+        val status = TextView(this).apply {
+            textSize = 12f
+            setTextColor(0xFF34445C.toInt())
+            visibility = View.GONE
+            setPadding(dp(12), dp(2), dp(12), dp(4))
+        }
+        chatStatus = status
 
         val send = Button(this).apply {
             text = "➤"
             textSize = 18f
-            setOnClickListener { sendMessage() }
+            setOnClickListener { sendCommand() }
         }
-        bar.addView(send, LinearLayout.LayoutParams(dp(48), dp(48)))
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), dp(3), dp(5), dp(3))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xFFF7F9FF.toInt())
+                cornerRadius = dp(28).toFloat()
+                setStroke(dp(1), 0xFFCAD7EA.toInt())
+            }
+            elevation = dp(8).toFloat()
+            addView(input, LinearLayout.LayoutParams(0, dp(48), 1f))
+            addView(send, LinearLayout.LayoutParams(dp(48), dp(48)))
+        }
         input.setOnEditorActionListener { _, actionId, _ ->
-            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEND) {
-                sendMessage()
+            if (actionId == EditorInfo.IME_ACTION_SEND) {
+                sendCommand()
                 true
             } else false
         }
-        root.addView(bar, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(54)
-        ))
 
-        val metrics = resources.displayMetrics
-        val panelWidth = (metrics.widthPixels * 0.94f).toInt()
-        val panelHeight = (metrics.heightPixels * 0.55f).toInt()
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            addView(status, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
+            addView(row, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(54)
+            ))
+        }
+        val screenW = resources.displayMetrics.widthPixels
         val params = WindowManager.LayoutParams(
-            panelWidth, panelHeight,
+            min(screenW - dp(20), dp(520)), dp(78),
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.CENTER
-            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
         }
-        windowManager.addView(root, params)
-        characterPanel = root
-        panelVisible = true
+        chatBar = container
+        chatParams = params
+        windowManager.addView(container, params)
+        chatVisible = true
+        updateChatPosition()
     }
 
-    private fun toggleChatBar() {
-        val bar = chatBar ?: return
-        chatVisible = !chatVisible
-        bar.visibility = if (chatVisible) View.VISIBLE else View.GONE
-        chatHistory?.visibility = if (chatVisible) View.VISIBLE else View.GONE
-        if (chatVisible) {
-            characterPanel?.let {
-                val p = it.layoutParams as WindowManager.LayoutParams
-                p.flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                windowManager.updateViewLayout(it, p)
-            }
-            messageInput?.requestFocus()
-            messageInput?.postDelayed({
-                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                messageInput?.let { imm.showSoftInput(it, InputMethodManager.SHOW_IMPLICIT) }
-            }, 180)
-        } else {
-            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            messageInput?.let { imm.hideSoftInputFromWindow(it.windowToken, 0) }
-            characterPanel?.let {
-                val p = it.layoutParams as WindowManager.LayoutParams
-                p.flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM
-                windowManager.updateViewLayout(it, p)
-            }
-        }
+    private fun hideChatBar() {
+        if (!chatVisible && chatBar == null) return
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        chatInput?.let { runCatching { imm.hideSoftInputFromWindow(it.windowToken, 0) } }
+        chatBar?.let { runCatching { windowManager.removeView(it) } }
+        chatBar = null
+        chatInput = null
+        chatStatus = null
+        chatParams = null
+        chatVisible = false
     }
 
-    private fun sendMessage() {
-        val text = messageInput?.text?.toString()?.trim().orEmpty()
+    private fun updateChatPosition() {
+        val cp = characterParams ?: return
+        val bp = chatParams ?: return
+        val screenH = resources.displayMetrics.heightPixels
+        bp.y = min(cp.y + cp.height + dp(8), screenH - dp(100)).coerceAtLeast(dp(24))
+        runCatching { chatBar?.let { windowManager.updateViewLayout(it, bp) } }
+    }
+
+    private fun sendCommand() {
+        val text = chatInput?.text?.toString()?.trim().orEmpty()
         if (text.isEmpty()) return
-        val current = chatHistory?.text?.toString().orEmpty()
-        chatHistory?.text = "$current\n나: $text"
-        messageInput?.setText("")
+        chatInput?.setText("")
+        chatStatus?.text = "나: $text"
+        chatStatus?.visibility = View.VISIBLE
         handleCommand(text)
     }
 
@@ -283,20 +328,11 @@ class OverlayService : Service() {
         }
         if (text.startsWith("/") && expression != null) {
             characterView?.setExpression(expression)
-            val label = when (expression) {
-                CharacterView.Expression.HAPPY -> "웃는"
-                CharacterView.Expression.SAD -> "슬픈"
-                CharacterView.Expression.SURPRISED -> "놀란"
-                CharacterView.Expression.CRYING -> "우는"
-                else -> "평온한"
-            }
-            showSpeech("$label 표정으로 바꿨어요!", 2800L)
-            appendAssistant("표정을 변경했어요.")
+            showStatus("표정을 변경했어요.")
             return
         }
         if (text.startsWith("/")) {
-            showSpeech("/웃다 · /슬프다 · /놀라다 · /울다", 4000L)
-            appendAssistant("사용할 수 있는 표정 명령어를 알려드렸어요.")
+            showStatus("명령어: /웃다 · /슬프다 · /놀라다 · /울다 · /기본")
             return
         }
 
@@ -304,19 +340,22 @@ class OverlayService : Service() {
         val searchPrefix = searchWords.firstOrNull { text.startsWith(it) }
         if (searchPrefix != null) {
             val query = text.removePrefix(searchPrefix).trim()
-            if (query.isNotBlank()) {
-                showSpeech("$query 검색 결과를 보여드릴게요!", 3200L)
-                appendAssistant("$query 검색 결과를 브라우저에서 열었어요.")
-                val url = "https://www.google.com/search?q=" + Uri.encode(query)
-                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                if (packageManager.getLaunchIntentForPackage("com.android.chrome") != null) {
-                    browserIntent.setPackage("com.android.chrome")
-                }
-                startActivity(browserIntent)
-            } else {
-                showSpeech("검색할 내용을 입력해 주세요.", 2600L)
+            if (query.isBlank()) {
+                showStatus("검색할 내용을 입력해 주세요.")
+                return
             }
+            characterView?.setExpression(CharacterView.Expression.HAPPY, 2600L)
+            characterView?.setTalking(true)
+            showStatus("$query 검색 결과를 보여드릴게요!")
+            val url = "https://www.google.com/search?q=" + Uri.encode(query)
+            val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (packageManager.getLaunchIntentForPackage("com.android.chrome") != null) {
+                browserIntent.setPackage("com.android.chrome")
+            }
+            runCatching { startActivity(browserIntent) }
+                .onFailure { showStatus("브라우저를 열지 못했어요.") }
+            characterView?.postDelayed({ characterView?.setTalking(false) }, 2400L)
             return
         }
 
@@ -338,51 +377,47 @@ class OverlayService : Service() {
         if (target != null && listOf("열어", "켜", "실행", "열기", "띄워").any { text.contains(it) }) {
             val launch = packageManager.getLaunchIntentForPackage(target.third)
             if (launch != null) {
-                showSpeech("웃으며 ${target.second} 앱을 열어드릴게요!", 3000L)
                 characterView?.setExpression(CharacterView.Expression.HAPPY, 2600L)
-                appendAssistant("${target.second} 앱을 열었어요.")
+                characterView?.setTalking(true)
+                showStatus("웃으며 ${target.second} 앱을 열어드릴게요!")
                 launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(launch)
+                runCatching { startActivity(launch) }
+                characterView?.postDelayed({ characterView?.setTalking(false) }, 2400L)
             } else {
-                showSpeech("${target.second} 앱을 찾지 못했어요.", 3000L)
-                appendAssistant("${target.second} 앱이 설치되어 있는지 확인해 주세요.")
+                showStatus("${target.second} 앱을 찾지 못했어요.")
             }
             return
         }
-
-        showSpeech("앱 열기는 '크롬 열어줘', 검색은 '검색해 날씨'처럼 입력해 주세요.", 4200L)
-        appendAssistant("현재는 앱 실행, 웹 검색, 표정 명령어를 지원해요.")
+        showStatus("앱 열기: '크롬 열어줘' · 검색: '검색해 날씨'")
     }
 
-    private fun appendAssistant(message: String) {
-        val current = chatHistory?.text?.toString().orEmpty()
-        chatHistory?.text = "$current\nAai: $message"
+    private fun showStatus(message: String) {
+        chatStatus?.text = message
+        chatStatus?.visibility = View.VISIBLE
     }
 
-    private fun showSpeech(message: String, duration: Long) {
-        speechBubble?.apply {
-            text = message
-            visibility = View.VISIBLE
-        }
-        characterView?.setTalking(true)
-        speechBubble?.postDelayed({
-            speechBubble?.visibility = View.GONE
-            characterView?.setTalking(false)
-        }, duration)
+    private fun keepCharacterOnScreen(params: WindowManager.LayoutParams) {
+        val screenW = resources.displayMetrics.widthPixels
+        val screenH = resources.displayMetrics.heightPixels
+        params.x = params.x.coerceIn(0, max(0, screenW - params.width))
+        params.y = params.y.coerceIn(dp(24), max(dp(24), screenH - params.height - dp(24)))
     }
 
-    private fun removeCharacterPanel() {
-        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        messageInput?.let { imm.hideSoftInputFromWindow(it.windowToken, 0) }
-        characterPanel?.let { windowManager.removeView(it) }
-        characterPanel = null
-        chatBar = null
-        chatHistory = null
-        messageInput = null
-        characterView = null
-        speechBubble = null
-        panelVisible = false
-        chatVisible = false
+    private fun saveCharacterPlacement(params: WindowManager.LayoutParams) {
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_X, params.x)
+            .putInt(KEY_Y, params.y)
+            .putFloat(KEY_SCALE, currentScale)
+            .apply()
+        updateChatPosition()
+    }
+
+    private fun stopOverlayAndService() {
+        hideCharacter()
+        bubble?.let { runCatching { windowManager.removeView(it) } }
+        bubble = null
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     private fun buildNotification(): Notification {
@@ -390,12 +425,17 @@ class OverlayService : Service() {
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        val stop = PendingIntent.getService(
+            this, 1, Intent(this, OverlayService::class.java).setAction(ACTION_STOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         return if (Build.VERSION.SDK_INT >= 26) {
             Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("Aai 실행 중")
-                .setContentText("플로팅 캐릭터 아이콘을 표시하고 있습니다.")
+                .setContentText("알림의 '오버레이 종료'로 언제든 종료할 수 있습니다.")
                 .setSmallIcon(android.R.drawable.sym_def_app_icon)
                 .setContentIntent(launch)
+                .addAction(Notification.Action.Builder(null, "오버레이 종료", stop).build())
                 .setOngoing(true)
                 .build()
         } else {
@@ -420,8 +460,8 @@ class OverlayService : Service() {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     override fun onDestroy() {
-        removeCharacterPanel()
-        bubble?.let { windowManager.removeView(it) }
+        hideCharacter()
+        bubble?.let { runCatching { windowManager.removeView(it) } }
         bubble = null
         super.onDestroy()
     }
@@ -431,5 +471,10 @@ class OverlayService : Service() {
     companion object {
         private const val CHANNEL_ID = "aai_overlay"
         private const val NOTIFICATION_ID = 101
+        private const val ACTION_STOP = "com.aai.app.STOP_OVERLAY"
+        private const val PREFS = "aai_overlay_preferences"
+        private const val KEY_X = "character_x"
+        private const val KEY_Y = "character_y"
+        private const val KEY_SCALE = "character_scale"
     }
 }
