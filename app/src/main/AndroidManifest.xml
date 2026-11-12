@@ -1,5 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <queries>
+        <package android:name="com.android.chrome" />
+        <package android:name="com.google.android.youtube" />
+        <package android:name="com.android.settings" />
+        <package android:name="com.sec.android.app.popupcalculator" />
+        <package android:name="com.sec.android.app.camera" />
+        <package android:name="com.google.android.apps.maps" />
+        <package android:name="com.android.vending" />
+        <package android:name="com.sec.android.app.sbrowser" />
+        <package android:name="com.sec.android.gallery3d" />
+        <package android:name="com.sec.android.app.myfiles" />
+        <package android:name="com.samsung.android.calendar" />
+        <package android:name="com.samsung.android.app.notes" />
+    </queries>
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
